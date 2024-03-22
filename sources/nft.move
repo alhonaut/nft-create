@@ -157,7 +157,10 @@ module overmind::NonFungibleToken {
         @param ctx - the transaction context
     */
     fun init(ctx: &mut TxContext) {
-        
+        transfer::transfer(MinterCap {
+            id: object::new(ctx),
+            sales: balance::zero()
+        }, tx_context::sender(ctx))
     }
 
     /* 
@@ -182,7 +185,26 @@ module overmind::NonFungibleToken {
         minter_cap: &mut MinterCap,
         ctx: &mut TxContext, 
     ) {
-        
+        assert!(coin::value(payment_coin) >= 1, EInsufficientPayment);
+
+        let balance_coin = coin::balance_mut(payment_coin);
+        let paid = balance::split(balance_coin, 1);
+
+        balance::join(&mut minter_cap.sales, paid);
+
+        let newNft = NonFungibleToken {
+            id: object::new(ctx),
+            name: string::utf8(nft_name),
+            description: string::utf8(nft_description),
+            image: url::new_unsafe_from_bytes(nft_image)
+        };
+
+        transfer::transfer(newNft, recipient); 
+
+        event::emit(NonFungibleTokenMinted {
+            nft_id: object::uid_to_inner(&newNft.id),
+            recipient: recipient,
+        });
     }
 
     /* 
@@ -200,7 +222,40 @@ module overmind::NonFungibleToken {
         new_image_url: vector<u8>,
         ctx: &mut TxContext,
     ): NonFungibleToken {
-        
+        let new_nft_name = nft1.name;
+        let nft2_name = nft2.name;
+        let name_mark = b" + ";
+        string::append_utf8(&mut new_nft_name, name_mark);
+        string::append(&mut new_nft_name, nft2_name);
+
+        let description_first = b"Combined NFT of ";
+        let description_second = b" and ";
+        let new_nft_description = string::utf8(b"");
+        string::append_utf8(&mut new_nft_description, description_first);
+        string::append(&mut new_nft_description, nft1.name);
+        string::append_utf8(&mut new_nft_description, description_second);
+        string::append(&mut new_nft_description, nft2.name);
+
+
+        let combinedNft = NonFungibleToken {
+            id: object::new(ctx),
+            name: new_nft_name,
+            description: new_nft_description,
+            image: url::new_unsafe_from_bytes(new_image_url)
+        };
+
+        transfer::transfer(combinedNft, tx_context::sender(ctx));
+
+        burn_nft(nft1);
+        burn_nft(nft2);
+
+        event::emit(NonFungibleTokenCombined {
+            nft1_id: object::uid_to_inner(&nft2.id),
+            nft2_id: object::uid_to_inner(&nft2.id),
+            new_nft_id: object::uid_to_inner(&combinedNft.id)
+        });
+
+        combinedNft
     }
 
     /* 
@@ -214,7 +269,16 @@ module overmind::NonFungibleToken {
         minter_cap: &mut MinterCap,
         ctx: &mut TxContext,
     ): Coin<SUI> {
-        
+        let amount = balance::value(&minter_cap.sales);
+        let sales = coin::take(&mut minter_cap.sales, amount, ctx);
+
+        transfer::transfer(sales, tx_context::sender(ctx));
+
+        event::emit(SalesWithdrawn {
+            amount: amount
+        });
+
+        sales
     }
 
     /*
@@ -222,7 +286,12 @@ module overmind::NonFungibleToken {
         @param nft - the NFT object
     */
     public fun burn_nft(nft: NonFungibleToken) {
-        
+        let NonFungibleToken { id, name: _, description: _, image: _ } = nft;
+        object::delete(id);
+
+        event::emit(NonFungibleTokenDeleted {
+            nft_id: object::uid_to_inner(&id)
+        });
     }
 
     /* 
@@ -231,7 +300,7 @@ module overmind::NonFungibleToken {
         @return the NFT's `name`
     */
     public fun name(nft: &NonFungibleToken): String {
-
+        *&nft.name
     }
 
     /* 
@@ -240,7 +309,7 @@ module overmind::NonFungibleToken {
         @return the NFT's `description`
     */
     public fun description(nft: &NonFungibleToken): String {
-
+        *&nft.description
     }
 
     /* 
